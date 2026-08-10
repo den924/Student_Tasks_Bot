@@ -11,7 +11,6 @@ const {
 const taskCreationState = new Map();
 
 function getSelectedGroup(telegramId) {
-
     if (!global.selectedGroups) {
         global.selectedGroups = new Map();
     }
@@ -19,1134 +18,851 @@ function getSelectedGroup(telegramId) {
     return global.selectedGroups.get(telegramId);
 }
 
-
 function clearTaskState(telegramId) {
     taskCreationState.delete(telegramId);
 }
 
-
 function registerTaskHandlers(bot) {
 
-
     // ==========================================
-    // СПИСОК ЗАДАЧ
+    // ВСЕ CALLBACK_QUERY ОБРАБОТЧИКИ
     // ==========================================
 
     bot.on("callback_query", async (query) => {
 
-        if (query.data !== "group_tasks") {
-            return;
-        }
+        const data = query.data;
 
-        try {
+        // ==========================================
+        // СПИСОК ЗАДАЧ
+        // ==========================================
 
-            const telegramId = query.from.id;
+        if (data === "group_tasks") {
 
-            const groupId = getSelectedGroup(
-                telegramId
-            );
+            try {
 
-            if (!groupId) {
+                const telegramId = query.from.id;
 
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text: "Сначала выберите группу",
-                        show_alert: true
-                    }
+                const groupId = getSelectedGroup(
+                    telegramId
                 );
 
-                return;
-            }
+                if (!groupId) {
 
-
-            const user = await User.findOne({
-                where: {
-                    telegramId: telegramId
-                }
-            });
-
-
-            if (!user) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text: "Пользователь не найден",
-                        show_alert: true
-                    }
-                );
-
-                return;
-            }
-
-
-            const membership =
-                await GroupMember.findOne({
-                    where: {
-                        userId: user.id,
-                        groupId: groupId
-                    }
-                });
-
-
-            if (!membership) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text: "Вы не состоите в этой группе",
-                        show_alert: true
-                    }
-                );
-
-                return;
-            }
-
-
-            const group = await Group.findByPk(
-                groupId
-            );
-
-
-            if (!group) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text: "Группа не найдена",
-                        show_alert: true
-                    }
-                );
-
-                return;
-            }
-
-
-            // Получаем задачи пользователя
-            // в выбранной группе
-
-            const taskMembers =
-                await TaskMember.findAll({
-
-                    where: {
-                        userId: user.id
-                    },
-
-                    include: [
+                    await bot.answerCallbackQuery(
+                        query.id,
                         {
-                            model: Task,
-                            as: "task",
-                            where: {
-                                groupId: groupId
-                            },
-                            include: [
-                                {
-                                    model: Subject,
-                                    as: "subject"
-                                }
-                            ]
+                            text: "Сначала выберите группу",
+                            show_alert: true
                         }
-                    ]
+                    );
 
+                    return;
+                }
+
+                const user = await User.findOne({
+                    where: {
+                        telegramId: telegramId
+                    }
                 });
 
+                if (!user) {
 
-            await bot.answerCallbackQuery(
-                query.id
-            );
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Пользователь не найден",
+                            show_alert: true
+                        }
+                    );
 
+                    return;
+                }
 
-            if (taskMembers.length === 0) {
+                const membership =
+                    await GroupMember.findOne({
+                        where: {
+                            userId: user.id,
+                            groupId: groupId
+                        }
+                    });
 
-                await bot.sendMessage(
-                    query.message.chat.id,
+                if (!membership) {
 
-                    `📝 В группе «${group.name}» у вас пока нет задач.`
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Вы не состоите в этой группе",
+                            show_alert: true
+                        }
+                    );
+
+                    return;
+                }
+
+                const group = await Group.findByPk(
+                    groupId
                 );
 
-                return;
-            }
+                if (!group) {
 
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Группа не найдена",
+                            show_alert: true
+                        }
+                    );
 
-            // ==========================================
-            // СОРТИРОВКА ПО ДЕДЛАЙНУ
-            // БЛИЖАЙШИЕ ЗАДАЧИ СВЕРХУ
-            // ==========================================
+                    return;
+                }
 
-            taskMembers.sort(
-                (a, b) => {
+                const taskMembers =
+                    await TaskMember.findAll({
+                        where: {
+                            userId: user.id
+                        },
+                        include: [
+                            {
+                                model: Task,
+                                as: "task",
+                                where: {
+                                    groupId: groupId
+                                },
+                                include: [
+                                    {
+                                        model: Subject,
+                                        as: "subject"
+                                    }
+                                ]
+                            }
+                        ]
+                    });
 
+                await bot.answerCallbackQuery(
+                    query.id
+                );
+
+                if (taskMembers.length === 0) {
+
+                    await bot.sendMessage(
+                        query.message.chat.id,
+                        `📝 В группе «${group.name}» у вас пока нет задач.`
+                    );
+
+                    return;
+                }
+
+                taskMembers.sort((a, b) => {
                     return new Date(
                         a.task.deadline
                     ) - new Date(
                         b.task.deadline
                     );
+                });
 
-                }
-            );
+                let message =
+                    `📝 Задачи группы «${group.name}»:\n\n`;
 
+                const keyboard = [];
 
-            let message =
-                `📝 Задачи группы «${group.name}»:\n\n`;
+                for (const taskMember of taskMembers) {
 
+                    const task = taskMember.task;
 
-            const keyboard = [];
-
-
-            for (const taskMember of taskMembers) {
-
-                const task =
-                    taskMember.task;
-
-
-                const status =
-                    taskMember.completed
-                        ? "✅ Выполнено"
-                        : "⏳ Не выполнено";
-
-
-                message +=
-                    `📝 ${task.title}\n` +
-                    `📚 ${task.subject?.name || "Без предмета"}\n` +
-                    `📅 ${formatDate(task.deadline)}\n` +
-                    `${status}\n`;
-
-
-                if (task.description) {
+                    const status =
+                        taskMember.completed
+                            ? "✅ Выполнено"
+                            : "⏳ Не выполнено";
 
                     message +=
-                        `📄 ${task.description}\n`;
+                        `📝 ${task.title}\n` +
+                        `📚 ${task.subject?.name || "Без предмета"}\n` +
+                        `📅 ${formatDate(task.deadline)}\n` +
+                        `${status}\n`;
 
+                    if (task.description) {
+                        message +=
+                            `📄 ${task.description}\n`;
+                    }
+
+                    message += "\n";
+
+                    keyboard.push([
+                        {
+                            text:
+                                `${taskMember.completed ? "✅" : "⬜"} ${task.title}`,
+
+                            callback_data:
+                                `task_view_${task.id}`
+                        }
+                    ]);
                 }
 
-
-                message += "\n";
-
-
-                keyboard.push([
+                await bot.sendMessage(
+                    query.message.chat.id,
+                    message,
                     {
-                        text:
-                            `${taskMember.completed ? "✅" : "⬜"} ${task.title}`,
-
-                        callback_data:
-                            `task_view_${task.id}`
+                        reply_markup: {
+                            inline_keyboard: keyboard
+                        }
                     }
-                ]);
+                );
 
+            } catch (error) {
+
+                console.error(
+                    "❌ Ошибка загрузки задач:",
+                    error
+                );
+
+                await bot.answerCallbackQuery(
+                    query.id,
+                    {
+                        text: "Ошибка загрузки задач",
+                        show_alert: true
+                    }
+                );
             }
 
-
-            await bot.sendMessage(
-
-                query.message.chat.id,
-
-                message,
-
-                {
-                    reply_markup: {
-                        inline_keyboard:
-                            keyboard
-                    }
-                }
-
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка загрузки задач:",
-                error
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id,
-                {
-                    text: "Ошибка загрузки задач",
-                    show_alert: true
-                }
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // ПРОСМОТР КОНКРЕТНОЙ ЗАДАЧИ
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (!query.data.startsWith("task_view_")) {
             return;
         }
 
 
-        try {
+        // ==========================================
+        // ПРОСМОТР КОНКРЕТНОЙ ЗАДАЧИ
+        // ==========================================
 
-            const telegramId =
-                query.from.id;
+        if (data.startsWith("task_view_")) {
 
+            try {
 
-            const taskId =
-                Number(
-                    query.data.replace(
+                const telegramId = query.from.id;
+
+                const taskId = Number(
+                    data.replace(
                         "task_view_",
                         ""
                     )
                 );
 
-
-            const user =
-                await User.findOne({
-
+                const user = await User.findOne({
                     where: {
-                        telegramId:
-                            telegramId
+                        telegramId: telegramId
                     }
-
                 });
 
+                if (!user) {
 
-            if (!user) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text:
-                            "Пользователь не найден"
-                    }
-                );
-
-                return;
-            }
-
-
-            const taskMember =
-                await TaskMember.findOne({
-
-                    where: {
-                        userId:
-                            user.id,
-
-                        taskId:
-                            taskId
-                    },
-
-                    include: [
+                    await bot.answerCallbackQuery(
+                        query.id,
                         {
-                            model: Task,
-                            as: "task",
-
-                            include: [
-                                {
-                                    model: Subject,
-                                    as: "subject"
-                                },
-                                {
-                                    model: Group,
-                                    as: "group"
-                                }
-                            ]
+                            text: "Пользователь не найден"
                         }
-                    ]
+                    );
 
-                });
+                    return;
+                }
 
+                const taskMember =
+                    await TaskMember.findOne({
+                        where: {
+                            userId: user.id,
+                            taskId: taskId
+                        },
+                        include: [
+                            {
+                                model: Task,
+                                as: "task",
+                                include: [
+                                    {
+                                        model: Subject,
+                                        as: "subject"
+                                    },
+                                    {
+                                        model: Group,
+                                        as: "group"
+                                    }
+                                ]
+                            }
+                        ]
+                    });
 
-            if (!taskMember) {
+                if (!taskMember) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Задача не найдена"
+                        }
+                    );
+
+                    return;
+                }
+
+                const task = taskMember.task;
+
+                await bot.answerCallbackQuery(
+                    query.id
+                );
+
+                const message =
+                    `📝 ${task.title}\n\n` +
+
+                    `📚 Предмет: ` +
+                    `${task.subject?.name || "Не указан"}\n` +
+
+                    `🏫 Группа: ` +
+                    `${task.group?.name || "Не указана"}\n` +
+
+                    `📅 Дедлайн: ` +
+                    `${formatDate(task.deadline)}\n\n` +
+
+                    `📄 Описание:\n` +
+                    `${task.description || "Без описания"}\n\n` +
+
+                    `Статус: ` +
+                    `${taskMember.completed
+                        ? "✅ Выполнено"
+                        : "⏳ Не выполнено"}`;
+
+                const keyboard = [];
+
+                if (taskMember.completed) {
+
+                    keyboard.push([
+                        {
+                            text:
+                                "↩️ Отметить как невыполненное",
+
+                            callback_data:
+                                `task_uncomplete_${task.id}`
+                        }
+                    ]);
+
+                } else {
+
+                    keyboard.push([
+                        {
+                            text:
+                                "✅ Отметить как выполненное",
+
+                            callback_data:
+                                `task_complete_${task.id}`
+                        }
+                    ]);
+                }
+
+                await bot.sendMessage(
+                    query.message.chat.id,
+                    message,
+                    {
+                        reply_markup: {
+                            inline_keyboard: keyboard
+                        }
+                    }
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "❌ Ошибка просмотра задачи:",
+                    error
+                );
 
                 await bot.answerCallbackQuery(
                     query.id,
                     {
-                        text:
-                            "Задача не найдена"
+                        text: "Ошибка",
+                        show_alert: true
                     }
                 );
-
-                return;
             }
 
-
-            const task =
-                taskMember.task;
-
-
-            await bot.answerCallbackQuery(
-                query.id
-            );
-
-
-            let message =
-                `📝 ${task.title}\n\n` +
-
-                `📚 Предмет: ` +
-                `${task.subject?.name || "Не указан"}\n` +
-
-                `🏫 Группа: ` +
-                `${task.group?.name || "Не указана"}\n` +
-
-                `📅 Дедлайн: ` +
-                `${formatDate(task.deadline)}\n\n` +
-
-                `📄 Описание:\n` +
-
-                `${task.description || "Без описания"}\n\n` +
-
-                `Статус: ` +
-
-                `${taskMember.completed
-                    ? "✅ Выполнено"
-                    : "⏳ Не выполнено"}`;
-
-
-            const keyboard = [];
-
-
-            if (taskMember.completed) {
-
-                keyboard.push([
-                    {
-                        text:
-                            "↩️ Отметить как невыполненное",
-
-                        callback_data:
-                            `task_uncomplete_${task.id}`
-                    }
-                ]);
-
-            } else {
-
-                keyboard.push([
-                    {
-                        text:
-                            "✅ Отметить как выполненное",
-
-                        callback_data:
-                            `task_complete_${task.id}`
-                    }
-                ]);
-
-            }
-
-
-            await bot.sendMessage(
-
-                query.message.chat.id,
-
-                message,
-
-                {
-                    reply_markup: {
-                        inline_keyboard:
-                            keyboard
-                    }
-                }
-
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка просмотра задачи:",
-                error
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id,
-                {
-                    text:
-                        "Ошибка",
-                    show_alert:
-                        true
-                }
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // ОТМЕТИТЬ ЗАДАЧУ ВЫПОЛНЕННОЙ
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (
-            !query.data.startsWith(
-                "task_complete_"
-            )
-        ) {
             return;
         }
 
 
-        try {
+        // ==========================================
+        // ОТМЕТИТЬ ЗАДАЧУ ВЫПОЛНЕННОЙ
+        // ==========================================
 
-            const telegramId =
-                query.from.id;
+        if (data.startsWith("task_complete_")) {
 
+            try {
 
-            const taskId =
-                Number(
-                    query.data.replace(
+                const telegramId = query.from.id;
+
+                const taskId = Number(
+                    data.replace(
                         "task_complete_",
                         ""
                     )
                 );
 
-
-            const user =
-                await User.findOne({
-
+                const user = await User.findOne({
                     where: {
-                        telegramId:
-                            telegramId
+                        telegramId: telegramId
                     }
-
                 });
 
+                if (!user) {
 
-            if (!user) {
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Пользователь не найден"
+                        }
+                    );
+
+                    return;
+                }
+
+                const taskMember =
+                    await TaskMember.findOne({
+                        where: {
+                            taskId: taskId,
+                            userId: user.id
+                        }
+                    });
+
+                if (!taskMember) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Задача не найдена"
+                        }
+                    );
+
+                    return;
+                }
+
+                await taskMember.update({
+                    completed: true,
+                    completedAt: new Date()
+                });
 
                 await bot.answerCallbackQuery(
                     query.id,
                     {
                         text:
-                            "Пользователь не найден"
+                            "Задача отмечена как выполненная"
                     }
                 );
 
-                return;
-            }
+                await bot.sendMessage(
+                    query.message.chat.id,
+                    "✅ Задача отмечена как выполненная."
+                );
 
+            } catch (error) {
 
-            const taskMember =
-                await TaskMember.findOne({
-
-                    where: {
-                        taskId:
-                            taskId,
-
-                        userId:
-                            user.id
-                    }
-
-                });
-
-
-            if (!taskMember) {
+                console.error(
+                    "❌ Ошибка выполнения задачи:",
+                    error
+                );
 
                 await bot.answerCallbackQuery(
                     query.id,
                     {
-                        text:
-                            "Задача не найдена"
+                        text: "Ошибка",
+                        show_alert: true
                     }
                 );
-
-                return;
             }
 
-
-            await taskMember.update({
-
-                completed:
-                    true,
-
-                completedAt:
-                    new Date()
-
-            });
-
-
-            await bot.answerCallbackQuery(
-
-                query.id,
-
-                {
-                    text:
-                        "Задача отмечена как выполненная"
-                }
-
-            );
-
-
-            await bot.sendMessage(
-
-                query.message.chat.id,
-
-                "✅ Задача отмечена как выполненная."
-
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка выполнения задачи:",
-                error
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id,
-                {
-                    text:
-                        "Ошибка",
-                    show_alert:
-                        true
-                }
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // СНЯТЬ ОТМЕТКУ ВЫПОЛНЕНИЯ
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (
-            !query.data.startsWith(
-                "task_uncomplete_"
-            )
-        ) {
             return;
         }
 
 
-        try {
+        // ==========================================
+        // СНЯТЬ ОТМЕТКУ ВЫПОЛНЕНИЯ
+        // ==========================================
 
-            const telegramId =
-                query.from.id;
+        if (data.startsWith("task_uncomplete_")) {
 
+            try {
 
-            const taskId =
-                Number(
-                    query.data.replace(
+                const telegramId = query.from.id;
+
+                const taskId = Number(
+                    data.replace(
                         "task_uncomplete_",
                         ""
                     )
                 );
 
-
-            const user =
-                await User.findOne({
-
+                const user = await User.findOne({
                     where: {
-                        telegramId:
-                            telegramId
+                        telegramId: telegramId
                     }
-
                 });
 
+                if (!user) {
 
-            if (!user) {
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Пользователь не найден"
+                        }
+                    );
+
+                    return;
+                }
+
+                const taskMember =
+                    await TaskMember.findOne({
+                        where: {
+                            taskId: taskId,
+                            userId: user.id
+                        }
+                    });
+
+                if (!taskMember) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text: "Задача не найдена"
+                        }
+                    );
+
+                    return;
+                }
+
+                await taskMember.update({
+                    completed: false,
+                    completedAt: null
+                });
 
                 await bot.answerCallbackQuery(
                     query.id,
                     {
                         text:
-                            "Пользователь не найден"
+                            "Отметка выполнения снята"
                     }
                 );
 
-                return;
-            }
+                await bot.sendMessage(
+                    query.message.chat.id,
+                    "↩️ Задача снова отмечена как невыполненная."
+                );
 
+            } catch (error) {
 
-            const taskMember =
-                await TaskMember.findOne({
-
-                    where: {
-                        taskId:
-                            taskId,
-
-                        userId:
-                            user.id
-                    }
-
-                });
-
-
-            if (!taskMember) {
+                console.error(
+                    "❌ Ошибка изменения статуса задачи:",
+                    error
+                );
 
                 await bot.answerCallbackQuery(
                     query.id,
                     {
-                        text:
-                            "Задача не найдена"
+                        text: "Ошибка",
+                        show_alert: true
                     }
                 );
-
-                return;
             }
 
-
-            await taskMember.update({
-
-                completed:
-                    false,
-
-                completedAt:
-                    null
-
-            });
-
-
-            await bot.answerCallbackQuery(
-
-                query.id,
-
-                {
-                    text:
-                        "Отметка выполнения снята"
-                }
-
-            );
-
-
-            await bot.sendMessage(
-
-                query.message.chat.id,
-
-                "↩️ Задача снова отмечена как невыполненная."
-
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка изменения статуса задачи:",
-                error
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id,
-                {
-                    text:
-                        "Ошибка",
-                    show_alert:
-                        true
-                }
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // НАЖАТИЕ "ДОБАВИТЬ ЗАДАЧУ"
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (query.data !== "add_task") {
             return;
         }
 
-        try {
+
+        // ==========================================
+        // ДОБАВИТЬ ЗАДАЧУ
+        // ==========================================
+
+        if (data === "add_task") {
+
+            try {
+
+                const telegramId = query.from.id;
+
+                const groupId =
+                    getSelectedGroup(
+                        telegramId
+                    );
+
+                if (!groupId) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text:
+                                "Сначала выберите группу",
+                            show_alert: true
+                        }
+                    );
+
+                    return;
+                }
+
+                const user = await User.findOne({
+                    where: {
+                        telegramId: telegramId
+                    }
+                });
+
+                if (!user) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text:
+                                "Пользователь не найден",
+                            show_alert: true
+                        }
+                    );
+
+                    return;
+                }
+
+                const membership =
+                    await GroupMember.findOne({
+                        where: {
+                            userId: user.id,
+                            groupId: groupId
+                        }
+                    });
+
+                if (!membership) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text:
+                                "Вы не состоите в этой группе",
+                            show_alert: true
+                        }
+                    );
+
+                    return;
+                }
+
+                taskCreationState.set(
+                    telegramId,
+                    {
+                        groupId: groupId,
+                        step: "SUBJECT"
+                    }
+                );
+
+                await bot.answerCallbackQuery(
+                    query.id
+                );
+
+                const subjects =
+                    await Subject.findAll({
+                        where: {
+                            groupId: groupId
+                        },
+                        order: [
+                            ["name", "ASC"]
+                        ]
+                    });
+
+                if (subjects.length === 0) {
+
+                    clearTaskState(
+                        telegramId
+                    );
+
+                    await bot.sendMessage(
+                        query.message.chat.id,
+
+                        "📚 В выбранной группе пока нет предметов.\n\n" +
+                        "Сначала необходимо добавить хотя бы один предмет."
+                    );
+
+                    return;
+                }
+
+                const keyboard =
+                    subjects.map(
+                        (subject) => [
+                            {
+                                text:
+                                    `📚 ${subject.name}`,
+
+                                callback_data:
+                                    `task_subject_${subject.id}`
+                            }
+                        ]
+                    );
+
+                keyboard.push([
+                    {
+                        text: "❌ Отмена",
+                        callback_data: "cancel_task"
+                    }
+                ]);
+
+                await bot.sendMessage(
+                    query.message.chat.id,
+
+                    "📚 Выберите предмет для задачи:",
+
+                    {
+                        reply_markup: {
+                            inline_keyboard: keyboard
+                        }
+                    }
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "❌ Ошибка начала создания задачи:",
+                    error
+                );
+
+                await bot.answerCallbackQuery(
+                    query.id,
+                    {
+                        text:
+                            "Произошла ошибка",
+                        show_alert: true
+                    }
+                );
+            }
+
+            return;
+        }
+
+
+        // ==========================================
+        // ВЫБОР ПРЕДМЕТА
+        // ==========================================
+
+        if (data.startsWith("task_subject_")) {
+
+            try {
+
+                const telegramId = query.from.id;
+
+                const state =
+                    taskCreationState.get(
+                        telegramId
+                    );
+
+                if (!state) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text:
+                                "Сессия создания задачи истекла",
+                            show_alert: true
+                        }
+                    );
+
+                    return;
+                }
+
+                const subjectId = Number(
+                    data.replace(
+                        "task_subject_",
+                        ""
+                    )
+                );
+
+                const subject =
+                    await Subject.findByPk(
+                        subjectId
+                    );
+
+                if (!subject) {
+
+                    await bot.answerCallbackQuery(
+                        query.id,
+                        {
+                            text:
+                                "Предмет не найден"
+                        }
+                    );
+
+                    return;
+                }
+
+                state.subjectId =
+                    subject.id;
+
+                state.subjectName =
+                    subject.name;
+
+                state.step =
+                    "TITLE";
+
+                await bot.answerCallbackQuery(
+                    query.id,
+                    {
+                        text:
+                            `Выбран предмет: ${subject.name}`
+                    }
+                );
+
+                await bot.sendMessage(
+                    query.message.chat.id,
+
+                    "📝 Введите название задачи:",
+
+                    {
+                        reply_markup: {
+                            keyboard: [
+                                ["❌ Отмена"]
+                            ],
+                            resize_keyboard: true
+                        }
+                    }
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "❌ Ошибка выбора предмета:",
+                    error
+                );
+            }
+
+            return;
+        }
+
+
+        // ==========================================
+        // ОТМЕНА СОЗДАНИЯ ЗАДАЧИ
+        // ==========================================
+
+        if (data === "cancel_task") {
 
             const telegramId =
                 query.from.id;
 
-
-            const groupId =
-                getSelectedGroup(
-                    telegramId
-                );
-
-
-            if (!groupId) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text:
-                            "Сначала выберите группу",
-                        show_alert:
-                            true
-                    }
-                );
-
-                return;
-            }
-
-
-            const user =
-                await User.findOne({
-
-                    where: {
-                        telegramId:
-                            telegramId
-                    }
-
-                });
-
-
-            if (!user) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text:
-                            "Пользователь не найден",
-                        show_alert:
-                            true
-                    }
-                );
-
-                return;
-            }
-
-
-            const membership =
-                await GroupMember.findOne({
-
-                    where: {
-                        userId:
-                            user.id,
-
-                        groupId:
-                            groupId
-                    }
-
-                });
-
-
-            if (!membership) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text:
-                            "Вы не состоите в этой группе",
-                        show_alert:
-                            true
-                    }
-                );
-
-                return;
-            }
-
-
-            taskCreationState.set(
-
-                telegramId,
-
-                {
-                    groupId:
-                        groupId,
-
-                    step:
-                        "SUBJECT"
-                }
-
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id
-            );
-
-
-            const subjects =
-                await Subject.findAll({
-
-                    where: {
-                        groupId:
-                            groupId
-                    },
-
-                    order: [
-                        ["name", "ASC"]
-                    ]
-
-                });
-
-
-            if (subjects.length === 0) {
-
-                clearTaskState(
-                    telegramId
-                );
-
-
-                await bot.sendMessage(
-
-                    query.message.chat.id,
-
-                    "📚 В выбранной группе пока нет предметов.\n\n" +
-                    "Сначала необходимо добавить хотя бы один предмет."
-
-                );
-
-
-                return;
-            }
-
-
-            const keyboard =
-                subjects.map(
-
-                    (subject) => [
-
-                        {
-                            text:
-                                `📚 ${subject.name}`,
-
-                            callback_data:
-                                `task_subject_${subject.id}`
-                        }
-
-                    ]
-
-                );
-
-
-            keyboard.push([
-
-                {
-                    text:
-                        "❌ Отмена",
-
-                    callback_data:
-                        "cancel_task"
-                }
-
-            ]);
-
-
-            await bot.sendMessage(
-
-                query.message.chat.id,
-
-                "📚 Выберите предмет для задачи:",
-
-                {
-                    reply_markup: {
-                        inline_keyboard:
-                            keyboard
-                    }
-                }
-
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка начала создания задачи:",
-                error
-            );
-
-
-            await bot.answerCallbackQuery(
-                query.id,
-                {
-                    text:
-                        "Произошла ошибка",
-                    show_alert:
-                        true
-                }
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // ВЫБОР ПРЕДМЕТА
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (
-            !query.data.startsWith(
-                "task_subject_"
-            )
-        ) {
-            return;
-        }
-
-
-        const telegramId =
-            query.from.id;
-
-
-        const state =
-            taskCreationState.get(
+            clearTaskState(
                 telegramId
             );
 
-
-        if (!state) {
-
             await bot.answerCallbackQuery(
                 query.id,
                 {
                     text:
-                        "Сессия создания задачи истекла",
-                    show_alert:
-                        true
+                        "Создание задачи отменено"
                 }
             );
-
-            return;
-        }
-
-
-        const subjectId =
-            Number(
-                query.data.replace(
-                    "task_subject_",
-                    ""
-                )
-            );
-
-
-        try {
-
-            const subject =
-                await Subject.findByPk(
-                    subjectId
-                );
-
-
-            if (!subject) {
-
-                await bot.answerCallbackQuery(
-                    query.id,
-                    {
-                        text:
-                            "Предмет не найден"
-                    }
-                );
-
-                return;
-            }
-
-
-            state.subjectId =
-                subject.id;
-
-            state.subjectName =
-                subject.name;
-
-            state.step =
-                "TITLE";
-
-
-            await bot.answerCallbackQuery(
-
-                query.id,
-
-                {
-                    text:
-                        `Выбран предмет: ${subject.name}`
-                }
-
-            );
-
 
             await bot.sendMessage(
-
                 query.message.chat.id,
 
-                "📝 Введите название задачи:",
+                "❌ Создание задачи отменено.",
 
                 {
                     reply_markup: {
-
-                        keyboard: [
-                            ["❌ Отмена"]
-                        ],
-
-                        resize_keyboard:
-                            true
-
+                        remove_keyboard: true
                     }
                 }
-
             );
 
-
-        } catch (error) {
-
-            console.error(
-                "❌ Ошибка выбора предмета:",
-                error
-            );
-
-        }
-
-    });
-
-
-    // ==========================================
-    // ОТМЕНА СОЗДАНИЯ ЗАДАЧИ
-    // ==========================================
-
-    bot.on("callback_query", async (query) => {
-
-        if (
-            query.data !==
-            "cancel_task"
-        ) {
             return;
         }
-
-
-        const telegramId =
-            query.from.id;
-
-
-        clearTaskState(
-            telegramId
-        );
-
-
-        await bot.answerCallbackQuery(
-
-            query.id,
-
-            {
-                text:
-                    "Создание задачи отменено"
-            }
-
-        );
-
-
-        await bot.sendMessage(
-
-            query.message.chat.id,
-
-            "❌ Создание задачи отменено.",
-
-            {
-                reply_markup: {
-                    remove_keyboard:
-                        true
-                }
-            }
-
-        );
-
     });
 
 
@@ -1162,17 +878,14 @@ function registerTaskHandlers(bot) {
         const text =
             msg.text;
 
-
         if (!text) {
             return;
         }
-
 
         const state =
             taskCreationState.get(
                 telegramId
             );
-
 
         if (!state) {
             return;
@@ -1183,31 +896,23 @@ function registerTaskHandlers(bot) {
         // ОТМЕНА
         // ==========================================
 
-        if (
-            text ===
-            "❌ Отмена"
-        ) {
+        if (text === "❌ Отмена") {
 
             clearTaskState(
                 telegramId
             );
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
 
                 "❌ Создание задачи отменено.",
 
                 {
                     reply_markup: {
-                        remove_keyboard:
-                            true
+                        remove_keyboard: true
                     }
                 }
-
             );
-
 
             return;
         }
@@ -1217,27 +922,17 @@ function registerTaskHandlers(bot) {
         // НАЗВАНИЕ
         // ==========================================
 
-        if (
-            state.step ===
-            "TITLE"
-        ) {
+        if (state.step === "TITLE") {
 
-            if (
-                text.length < 2
-            ) {
+            if (text.length < 2) {
 
                 await bot.sendMessage(
-
                     msg.chat.id,
-
                     "Название слишком короткое. Попробуйте ещё раз."
-
                 );
-
 
                 return;
             }
-
 
             state.title =
                 text.trim();
@@ -1245,16 +940,12 @@ function registerTaskHandlers(bot) {
             state.step =
                 "DESCRIPTION";
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
 
                 "📄 Введите описание задачи.\n\n" +
                 "Если описание не требуется, напишите: Нет"
-
             );
-
 
             return;
         }
@@ -1264,38 +955,24 @@ function registerTaskHandlers(bot) {
         // ОПИСАНИЕ
         // ==========================================
 
-        if (
-            state.step ===
-            "DESCRIPTION"
-        ) {
+        if (state.step === "DESCRIPTION") {
 
             state.description =
-
-                text
-                    .trim()
-                    .toLowerCase() ===
-                    "нет"
-
+                text.trim().toLowerCase() === "нет"
                     ? null
-
                     : text.trim();
-
 
             state.step =
                 "DEADLINE";
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
 
                 "📅 Введите дедлайн в формате:\n\n" +
                 "ДД.ММ.ГГГГ ЧЧ:ММ\n\n" +
                 "Например:\n" +
                 "20.08.2026 18:00"
-
             );
-
 
             return;
         }
@@ -1305,21 +982,16 @@ function registerTaskHandlers(bot) {
         // ДЕДЛАЙН
         // ==========================================
 
-        if (
-            state.step ===
-            "DEADLINE"
-        ) {
+        if (state.step === "DEADLINE") {
 
             const deadline =
                 parseDeadline(
                     text.trim()
                 );
 
-
             if (!deadline) {
 
                 await bot.sendMessage(
-
                     msg.chat.id,
 
                     "❌ Неверный формат даты.\n\n" +
@@ -1327,31 +999,21 @@ function registerTaskHandlers(bot) {
                     "ДД.ММ.ГГГГ ЧЧ:ММ\n\n" +
                     "Например:\n" +
                     "20.08.2026 18:00"
-
                 );
-
 
                 return;
             }
 
-
-            if (
-                deadline <=
-                new Date()
-            ) {
+            if (deadline <= new Date()) {
 
                 await bot.sendMessage(
-
                     msg.chat.id,
 
                     "❌ Дедлайн должен быть в будущем."
-
                 );
-
 
                 return;
             }
-
 
             state.deadline =
                 deadline;
@@ -1359,40 +1021,22 @@ function registerTaskHandlers(bot) {
             state.step =
                 "TARGET";
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
 
                 "👥 Для кого создать задачу?",
 
                 {
                     reply_markup: {
-
                         keyboard: [
-
-                            [
-                                "👤 Только для себя"
-                            ],
-
-                            [
-                                "👥 Для всей группы"
-                            ],
-
-                            [
-                                "❌ Отмена"
-                            ]
-
+                            ["👤 Только для себя"],
+                            ["👥 Для всей группы"],
+                            ["❌ Отмена"]
                         ],
-
-                        resize_keyboard:
-                            true
-
+                        resize_keyboard: true
                     }
                 }
-
             );
-
 
             return;
         }
@@ -1402,62 +1046,34 @@ function registerTaskHandlers(bot) {
         // КОМУ НАЗНАЧИТЬ ЗАДАЧУ
         // ==========================================
 
-        if (
-            state.step ===
-            "TARGET"
-        ) {
+        if (state.step === "TARGET") {
 
             if (
-
-                text !==
-                "👤 Только для себя"
-
-                &&
-
-                text !==
-                "👥 Для всей группы"
-
+                text !== "👤 Только для себя" &&
+                text !== "👥 Для всей группы"
             ) {
 
                 await bot.sendMessage(
-
                     msg.chat.id,
-
                     "Выберите один из вариантов:"
-
                 );
-
 
                 return;
             }
 
-
             state.targetType =
-
-                text ===
-                "👤 Только для себя"
-
+                text === "👤 Только для себя"
                     ? "PERSONAL"
-
                     : "GROUP";
 
-
             await finishTaskCreation(
-
                 bot,
-
                 msg,
-
                 telegramId,
-
                 state
-
             );
-
         }
-
     });
-
 }
 
 
@@ -1476,14 +1092,10 @@ async function finishTaskCreation(
 
         const user =
             await User.findOne({
-
                 where: {
-                    telegramId:
-                        telegramId
+                    telegramId: telegramId
                 }
-
             });
-
 
         if (!user) {
 
@@ -1491,35 +1103,21 @@ async function finishTaskCreation(
                 telegramId
             );
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
-
                 "Пользователь не найден."
-
             );
-
 
             return;
         }
 
-
         const membership =
             await GroupMember.findOne({
-
                 where: {
-
-                    userId:
-                        user.id,
-
-                    groupId:
-                        state.groupId
-
+                    userId: user.id,
+                    groupId: state.groupId
                 }
-
             });
-
 
         if (!membership) {
 
@@ -1527,15 +1125,10 @@ async function finishTaskCreation(
                 telegramId
             );
 
-
             await bot.sendMessage(
-
                 msg.chat.id,
-
                 "Вы не состоите в выбранной группе."
-
             );
-
 
             return;
         }
@@ -1545,10 +1138,7 @@ async function finishTaskCreation(
         // ЛИЧНАЯ ЗАДАЧА
         // ==========================================
 
-        if (
-            state.targetType ===
-            "PERSONAL"
-        ) {
+        if (state.targetType === "PERSONAL") {
 
             const task =
                 await Task.create({
@@ -1573,9 +1163,7 @@ async function finishTaskCreation(
 
                     targetType:
                         "PERSONAL"
-
                 });
-
 
             await TaskMember.create({
 
@@ -1587,14 +1175,11 @@ async function finishTaskCreation(
 
                 completed:
                     false
-
             });
-
 
             clearTaskState(
                 telegramId
             );
-
 
             await bot.sendMessage(
 
@@ -1612,18 +1197,14 @@ async function finishTaskCreation(
 
                 {
                     reply_markup: {
-                        remove_keyboard:
-                            true
+                        remove_keyboard: true
                     }
                 }
-
             );
-
 
             console.log(
                 `📝 Создана личная задача №${task.id}`
             );
-
 
             return;
         }
@@ -1633,20 +1214,14 @@ async function finishTaskCreation(
         // ЗАДАЧА ДЛЯ ВСЕЙ ГРУППЫ
         // ==========================================
 
-        if (
-            state.targetType ===
-            "GROUP"
-        ) {
+        if (state.targetType === "GROUP") {
 
 
             // ==========================================
             // КУРАТОР
             // ==========================================
 
-            if (
-                membership.role ===
-                "CURATOR"
-            ) {
+            if (membership.role === "CURATOR") {
 
                 const task =
                     await Task.create({
@@ -1671,20 +1246,15 @@ async function finishTaskCreation(
 
                         targetType:
                             "GROUP"
-
                     });
-
 
                 const members =
                     await GroupMember.findAll({
-
                         where: {
                             groupId:
                                 state.groupId
                         }
-
                     });
-
 
                 for (
                     const member
@@ -1694,31 +1264,23 @@ async function finishTaskCreation(
                     await TaskMember.findOrCreate({
 
                         where: {
-
                             taskId:
                                 task.id,
 
                             userId:
                                 member.userId
-
                         },
 
                         defaults: {
-
                             completed:
                                 false
-
                         }
-
                     });
-
                 }
-
 
                 clearTaskState(
                     telegramId
                 );
-
 
                 await bot.sendMessage(
 
@@ -1736,18 +1298,14 @@ async function finishTaskCreation(
 
                     {
                         reply_markup: {
-                            remove_keyboard:
-                                true
+                            remove_keyboard: true
                         }
                     }
-
                 );
-
 
                 console.log(
                     `👥 Куратор создал групповую задачу №${task.id}`
                 );
-
 
                 return;
             }
@@ -1757,10 +1315,7 @@ async function finishTaskCreation(
             // MEMBER → ЗАПРОС КУРАТОРУ
             // ==========================================
 
-            if (
-                membership.role ===
-                "MEMBER"
-            ) {
+            if (membership.role === "MEMBER") {
 
                 const request =
                     await TaskRequest.create({
@@ -1785,14 +1340,11 @@ async function finishTaskCreation(
 
                         status:
                             "PENDING"
-
                     });
-
 
                 clearTaskState(
                     telegramId
                 );
-
 
                 await bot.sendMessage(
 
@@ -1808,29 +1360,22 @@ async function finishTaskCreation(
 
                     {
                         reply_markup: {
-                            remove_keyboard:
-                                true
+                            remove_keyboard: true
                         }
                     }
-
                 );
-
 
                 console.log(
                     `📩 Создан запрос на групповую задачу №${request.id}`
                 );
 
-
                 return;
             }
-
         }
-
 
         clearTaskState(
             telegramId
         );
-
 
     } catch (error) {
 
@@ -1839,22 +1384,15 @@ async function finishTaskCreation(
             error
         );
 
-
         clearTaskState(
             telegramId
         );
 
-
         await bot.sendMessage(
-
             msg.chat.id,
-
             "❌ Не удалось создать задачу. Попробуйте ещё раз."
-
         );
-
     }
-
 }
 
 
@@ -1869,11 +1407,9 @@ function parseDeadline(value) {
             /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})$/
         );
 
-
     if (!match) {
         return null;
     }
-
 
     const day =
         Number(match[1]);
@@ -1890,65 +1426,37 @@ function parseDeadline(value) {
     const minute =
         Number(match[5]);
 
-
     if (
-
         month < 1 ||
         month > 12 ||
-
         day < 1 ||
         day > 31 ||
-
         hour < 0 ||
         hour > 23 ||
-
         minute < 0 ||
         minute > 59
-
     ) {
-
         return null;
     }
-
 
     const date =
         new Date(
-
             year,
-
             month - 1,
-
             day,
-
             hour,
-
             minute
-
         );
 
-
     if (
-
-        date.getFullYear() !==
-            year ||
-
-        date.getMonth() !==
-            month - 1 ||
-
-        date.getDate() !==
-            day ||
-
-        date.getHours() !==
-            hour ||
-
-        date.getMinutes() !==
-            minute
-
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day ||
+        date.getHours() !== hour ||
+        date.getMinutes() !== minute
     ) {
-
         return null;
     }
-
 
     return date;
 }
@@ -1968,7 +1476,6 @@ function formatDate(date) {
             "0"
         );
 
-
     const month =
         String(
             date.getMonth() + 1
@@ -1977,10 +1484,8 @@ function formatDate(date) {
             "0"
         );
 
-
     const year =
         date.getFullYear();
-
 
     const hours =
         String(
@@ -1990,7 +1495,6 @@ function formatDate(date) {
             "0"
         );
 
-
     const minutes =
         String(
             date.getMinutes()
@@ -1999,12 +1503,10 @@ function formatDate(date) {
             "0"
         );
 
-
     return (
         `${day}.${month}.${year} ` +
         `${hours}:${minutes}`
     );
-
 }
 
 
