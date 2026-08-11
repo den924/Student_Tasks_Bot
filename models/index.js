@@ -9,6 +9,8 @@ const TaskMember = require("./TaskMember");
 const TaskRequest = require("./TaskRequest");
 const TaskNotification = require("./TaskNotification");
 
+const Schedule = require("./Schedule");
+
 
 // ==========================================
 // USER ↔ GROUP MEMBER
@@ -220,14 +222,51 @@ TaskNotification.belongsTo(User, {
 });
 
 
+// ==========================================
+// GROUP ↔ SCHEDULE
+// ==========================================
+
+Group.hasMany(Schedule, {
+    foreignKey: "groupId",
+    as: "schedules"
+});
+
+Schedule.belongsTo(Group, {
+    foreignKey: "groupId",
+    as: "group"
+});
+
+
+// ==========================================
+// SUBJECT ↔ SCHEDULE
+// ==========================================
+
+Subject.hasMany(Schedule, {
+    foreignKey: "subjectId",
+    as: "schedules"
+});
+
+Schedule.belongsTo(Subject, {
+    foreignKey: "subjectId",
+    as: "subject"
+});
+
+
+// ==========================================
+// ЭКСПОРТ МОДЕЛЕЙ
+// ==========================================
+
 module.exports = {
     User,
     Group,
     GroupMember,
     GroupRequest,
     Subject,
+
     Task,
     TaskMember,
     TaskRequest,
-    TaskNotification
+    TaskNotification,
+
+    Schedule
 };

@@ -4,22 +4,41 @@ require("dotenv").config();
 const { connectDatabase } = require("./config/database");
 const { User } = require("./models");
 
-const registerGroupHandlers = require("./handlers/groups");
-const registerSubjectHandlers = require("./handlers/subjects");
-const registerTaskHandlers = require("./handlers/tasks");
-const registerTaskRequestHandlers = require("./handlers/taskRequests");
-const { startTaskNotificationScheduler, checkTaskNotifications } = require("./services/taskNotifications");
+const registerGroupHandlers =
+    require("./handlers/groups");
+
+const registerSubjectHandlers =
+    require("./handlers/subjects");
+
+const registerTaskHandlers =
+    require("./handlers/tasks");
+
+const registerTaskRequestHandlers =
+    require("./handlers/taskRequests");
+
+const {
+    startTaskNotificationScheduler,
+    checkTaskNotifications
+} = require("./services/taskNotifications");
 
 const {
     registerGroupSelectionHandlers,
     sendGroups
 } = require("./handlers/groupSelection");
 
-const registerAdminHandlers = require("./handlers/admin");
+const registerAdminHandlers =
+    require("./handlers/admin");
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-    polling: true
-});
+const registerScheduleHandlers =
+    require("./handlers/schedule");
+
+
+const bot = new TelegramBot(
+    process.env.BOT_TOKEN,
+    {
+        polling: true
+    }
+);
 
 
 // ==========================================
@@ -32,7 +51,9 @@ async function startBot() {
 
         await connectDatabase();
 
-        console.log("🤖 Telegram-бот запущен!");
+        console.log(
+            "🤖 Telegram-бот запущен!"
+        );
 
     } catch (error) {
 
@@ -40,9 +61,12 @@ async function startBot() {
             "❌ Не удалось запустить бота:"
         );
 
-        console.error(error);
+        console.error(
+            error
+        );
     }
 }
+
 
 startBot();
 
@@ -51,146 +75,282 @@ startBot();
 // КОМАНДА /START
 // ==========================================
 
-bot.onText(/\/start/, async (msg) => {
+bot.onText(
+    /\/start/,
+    async (msg) => {
 
-    try {
+        try {
 
-        const telegramId = msg.from.id;
+            const telegramId =
+                msg.from.id;
 
-        let user = await User.findOne({
-            where: {
-                telegramId: telegramId
+
+            let user =
+                await User.findOne({
+
+                    where: {
+                        telegramId:
+                            telegramId
+                    }
+
+                });
+
+
+            // ==========================================
+            // СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ
+            // ==========================================
+
+            if (!user) {
+
+                user =
+                    await User.create({
+
+                        telegramId:
+                            telegramId,
+
+                        username:
+                            msg.from.username ||
+                            null,
+
+                        firstName:
+                            msg.from.first_name ||
+                            null,
+
+                        lastName:
+                            msg.from.last_name ||
+                            null
+
+                    });
+
+
+                console.log(
+
+                    `👤 Новый пользователь: ${telegramId}`
+
+                );
+
+            } else {
+
+                await user.update({
+
+                    username:
+                        msg.from.username ||
+                        null,
+
+                    firstName:
+                        msg.from.first_name ||
+                        null,
+
+                    lastName:
+                        msg.from.last_name ||
+                        null
+
+                });
+
+
+                console.log(
+
+                    `👤 Пользователь вернулся: ${telegramId}`
+
+                );
             }
-        });
 
 
-        // ==========================================
-        // СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ
-        // ==========================================
+            // ==========================================
+            // АДМИНИСТРАТОР
+            // ==========================================
 
-        if (!user) {
+            if (
 
-            user = await User.create({
-                telegramId: telegramId,
-                username: msg.from.username || null,
-                firstName: msg.from.first_name || null,
-                lastName: msg.from.last_name || null
-            });
+                String(telegramId) ===
+                String(
+                    process.env.ADMIN_TELEGRAM_ID
+                )
 
-            console.log(
-                `👤 Новый пользователь: ${telegramId}`
+            ) {
+
+                await bot.sendMessage(
+
+                    msg.chat.id,
+
+                    "🛠 Вы вошли как администратор.",
+
+                    {
+                        reply_markup: {
+
+                            inline_keyboard: [
+
+                                [
+
+                                    {
+                                        text:
+                                            "🛠 Администрирование",
+
+                                        callback_data:
+                                            "admin_menu"
+                                    }
+
+                                ]
+
+                            ]
+
+                        }
+                    }
+
+                );
+
+            }
+
+
+            // ==========================================
+            // СПИСОК ГРУПП
+            // ==========================================
+
+            await sendGroups(
+
+                bot,
+
+                msg.chat.id,
+
+                0
+
             );
 
-        } else {
+        } catch (error) {
 
-            await user.update({
-                username: msg.from.username || null,
-                firstName: msg.from.first_name || null,
-                lastName: msg.from.last_name || null
-            });
+            console.error(
 
-            console.log(
-                `👤 Пользователь вернулся: ${telegramId}`
+                "❌ Ошибка при выполнении /start:",
+
+                error
+
             );
-        }
 
-
-        // ==========================================
-        // АДМИНИСТРАТОР
-        // ==========================================
-
-        if (
-            String(telegramId) ===
-            String(process.env.ADMIN_TELEGRAM_ID)
-        ) {
 
             await bot.sendMessage(
+
                 msg.chat.id,
-                "🛠 Вы вошли как администратор.",
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "🛠 Администрирование",
-                                    callback_data: "admin_menu"
-                                }
-                            ]
-                        ]
-                    }
-                }
+
+                "Произошла ошибка. Попробуйте ещё раз."
+
             );
+
         }
 
-
-        // ==========================================
-        // СПИСОК ГРУПП
-        // ==========================================
-
-        await sendGroups(
-            bot,
-            msg.chat.id,
-            0
-        );
-
-    } catch (error) {
-
-        console.error(
-            "❌ Ошибка при выполнении /start:",
-            error
-        );
-
-        await bot.sendMessage(
-            msg.chat.id,
-            "Произошла ошибка. Попробуйте ещё раз."
-        );
     }
-});
+);
 
 
 // ==========================================
 // ОБРАБОТЧИК ГРУПП
 // ==========================================
 
-registerGroupHandlers(bot);
+registerGroupHandlers(
+    bot
+);
 
 
 // ==========================================
 // ОБРАБОТЧИК ВЫБОРА ГРУППЫ
 // ==========================================
 
-registerGroupSelectionHandlers(bot);
+registerGroupSelectionHandlers(
+    bot
+);
 
 
 // ==========================================
 // ОБРАБОТЧИК АДМИНИСТРАТОРА
 // ==========================================
 
-registerAdminHandlers(bot);
+registerAdminHandlers(
+    bot
+);
 
-registerSubjectHandlers(bot);
 
-registerTaskHandlers(bot);
+// ==========================================
+// ОБРАБОТЧИК ПРЕДМЕТОВ
+// ==========================================
 
-registerTaskRequestHandlers(bot);
+registerSubjectHandlers(
+    bot
+);
 
-startTaskNotificationScheduler(bot);
 
-bot.on("message", async (msg) => {
+// ==========================================
+// ОБРАБОТЧИК ЗАДАЧ
+// ==========================================
 
-    if (msg.text !== "/testnotifications") {
-        return;
+registerTaskHandlers(
+    bot
+);
+
+
+// ==========================================
+// ОБРАБОТЧИК ЗАПРОСОВ НА ЗАДАЧИ
+// ==========================================
+
+registerTaskRequestHandlers(
+    bot
+);
+
+
+// ==========================================
+// ОБРАБОТЧИК РАСПИСАНИЯ
+// ==========================================
+
+registerScheduleHandlers(
+    bot
+);
+
+
+// ==========================================
+// ПЛАНИРОВЩИК УВЕДОМЛЕНИЙ
+// ==========================================
+
+startTaskNotificationScheduler(
+    bot
+);
+
+
+// ==========================================
+// ТЕСТ УВЕДОМЛЕНИЙ
+// ==========================================
+
+bot.on(
+    "message",
+    async (msg) => {
+
+        if (
+            msg.text !==
+            "/testnotifications"
+        ) {
+
+            return;
+        }
+
+
+        await bot.sendMessage(
+
+            msg.chat.id,
+
+            "🔎 Запускаю проверку уведомлений..."
+
+        );
+
+
+        await checkTaskNotifications(
+            bot
+        );
+
+
+        await bot.sendMessage(
+
+            msg.chat.id,
+
+            "✅ Проверка уведомлений завершена."
+
+        );
+
     }
-
-    await bot.sendMessage(
-        msg.chat.id,
-        "🔎 Запускаю проверку уведомлений..."
-    );
-
-    await checkTaskNotifications(bot);
-
-    await bot.sendMessage(
-        msg.chat.id,
-        "✅ Проверка уведомлений завершена."
-    );
-});
+);

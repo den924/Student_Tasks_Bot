@@ -11,6 +11,30 @@ const {
 const GROUPS_PER_PAGE = 3;
 
 
+// ==========================================
+// ПОЛУЧЕНИЕ ВЫБРАННОЙ ГРУППЫ
+// ==========================================
+
+function getSelectedGroup(telegramId) {
+
+    if (!global.selectedGroups) {
+
+        global.selectedGroups =
+            new Map();
+
+    }
+
+    return global.selectedGroups.get(
+        telegramId
+    );
+
+}
+
+
+// ==========================================
+// ПОКАЗ СПИСКА ГРУПП
+// ==========================================
+
 async function sendGroups(
     bot,
     chatId,
@@ -20,21 +44,26 @@ async function sendGroups(
     const totalGroups =
         await Group.count();
 
-    const totalPages = Math.max(
-        1,
-        Math.ceil(
-            totalGroups /
-            GROUPS_PER_PAGE
-        )
-    );
+
+    const totalPages =
+        Math.max(
+            1,
+            Math.ceil(
+                totalGroups /
+                GROUPS_PER_PAGE
+            )
+        );
+
 
     if (page < 0) {
         page = 0;
     }
 
+
     if (page >= totalPages) {
         page = totalPages - 1;
     }
+
 
     const groups =
         await Group.findAll({
@@ -52,15 +81,20 @@ async function sendGroups(
 
         });
 
+
     if (groups.length === 0) {
 
         await bot.sendMessage(
+
             chatId,
+
             "Пока нет доступных учебных групп."
+
         );
 
         return;
     }
+
 
     await bot.sendMessage(
 
@@ -69,19 +103,307 @@ async function sendGroups(
         "🏫 Выберите учебную группу:",
 
         {
+
             reply_markup:
                 createGroupsKeyboard(
                     groups,
                     page,
                     totalPages
                 )
+
         }
 
     );
+
 }
 
 
-function registerGroupSelectionHandlers(bot) {
+// ==========================================
+// ПОКАЗ ГЛАВНОГО МЕНЮ ГРУППЫ
+// ==========================================
+
+async function sendGroupMenu(
+    bot,
+    chatId,
+    telegramId,
+    options = {}
+) {
+
+    try {
+
+        const groupId =
+            getSelectedGroup(
+                telegramId
+            );
+
+
+        if (!groupId) {
+
+            await bot.sendMessage(
+
+                chatId,
+
+                "❌ Группа не выбрана."
+
+            );
+
+            return;
+
+        }
+
+
+        const group =
+            await Group.findByPk(
+                groupId
+            );
+
+
+        if (!group) {
+
+            await bot.sendMessage(
+
+                chatId,
+
+                "❌ Выбранная группа не найдена."
+
+            );
+
+            return;
+
+        }
+
+
+        const user =
+            await User.findOne({
+
+                where: {
+                    telegramId:
+                        telegramId
+                }
+
+            });
+
+
+        if (!user) {
+
+            await bot.sendMessage(
+
+                chatId,
+
+                "❌ Пользователь не найден."
+
+            );
+
+            return;
+
+        }
+
+
+        const membership =
+            await GroupMember.findOne({
+
+                where: {
+
+                    userId:
+                        user.id,
+
+                    groupId:
+                        group.id
+
+                }
+
+            });
+
+
+        if (!membership) {
+
+            await bot.sendMessage(
+
+                chatId,
+
+                "❌ Вы не состоите в выбранной группе."
+
+            );
+
+            return;
+
+        }
+
+
+        // ==========================================
+        // ОСНОВНОЕ МЕНЮ
+        // ==========================================
+
+        const keyboard = [
+
+            [
+
+                {
+                    text:
+                        "📚 Предметы",
+
+                    callback_data:
+                        "group_subjects"
+                }
+
+            ],
+
+            [
+
+                {
+                    text:
+                        "📝 Задачи",
+
+                    callback_data:
+                        "group_tasks"
+                }
+
+            ],
+
+            [
+
+                {
+                    text:
+                        "➕ Добавить задачу",
+
+                    callback_data:
+                        "add_task"
+                }
+
+            ],
+
+            [
+
+                {
+                    text:
+                        "📅 Расписание",
+
+                    callback_data:
+                        "group_schedule"
+                }
+
+            ],
+
+            // ==========================================
+            // СМЕНА ГРУППЫ
+            // ==========================================
+
+            [
+
+                {
+                    text:
+                        "🔄 Выбрать другую группу",
+
+                    callback_data:
+                        "change_group"
+                }
+
+            ]
+
+        ];
+
+
+        // ==========================================
+        // МЕНЮ КУРАТОРА
+        // ==========================================
+
+        if (
+            membership.role ===
+            "CURATOR"
+        ) {
+
+            keyboard.push([
+
+                {
+
+                    text:
+                        "📩 Запросы на задачи",
+
+                    callback_data:
+                        "curator_task_requests"
+
+                }
+
+            ]);
+
+
+            keyboard.push([
+
+                {
+
+                    text:
+                        "📢 Уведомление группе",
+
+                    callback_data:
+                        "curator_group_notification"
+
+                }
+
+            ]);
+
+        }
+
+
+        const prefix =
+            options.prefix ||
+            "🏫 Выбранная группа";
+
+
+        const message =
+            `${prefix}: ${group.name}\n\n` +
+            `Выберите необходимое действие:`;
+
+
+        await bot.sendMessage(
+
+            chatId,
+
+            message,
+
+            {
+
+                reply_markup: {
+
+                    inline_keyboard:
+                        keyboard
+
+                }
+
+            }
+
+        );
+
+    } catch (error) {
+
+        console.error(
+
+            "❌ Ошибка открытия меню группы:",
+
+            error
+
+        );
+
+
+        await bot.sendMessage(
+
+            chatId,
+
+            "❌ Не удалось открыть меню группы."
+
+        );
+
+    }
+
+}
+
+
+// ==========================================
+// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ
+// ==========================================
+
+function registerGroupSelectionHandlers(
+    bot
+) {
 
     // ==========================================
     // ЕДИНЫЙ CALLBACK_QUERY ОБРАБОТЧИК
@@ -91,7 +413,71 @@ function registerGroupSelectionHandlers(bot) {
         "callback_query",
         async (query) => {
 
-            const data = query.data;
+            const data =
+                query.data;
+
+
+            const telegramId =
+                query.from.id;
+
+
+            // ==========================================
+            // СМЕНА ГРУППЫ
+            // ==========================================
+
+            if (
+                data ===
+                "change_group"
+            ) {
+
+                try {
+
+                    await bot.answerCallbackQuery(
+                        query.id
+                    );
+
+
+                    await sendGroups(
+
+                        bot,
+
+                        query.message.chat.id,
+
+                        0
+
+                    );
+
+                } catch (error) {
+
+                    console.error(
+
+                        "❌ Ошибка смены группы:",
+
+                        error
+
+                    );
+
+
+                    await bot.answerCallbackQuery(
+
+                        query.id,
+
+                        {
+
+                            text:
+                                "Не удалось открыть список групп",
+
+                            show_alert:
+                                true
+
+                        }
+
+                    );
+
+                }
+
+                return;
+            }
 
 
             // ==========================================
@@ -110,25 +496,62 @@ function registerGroupSelectionHandlers(bot) {
                 ) {
 
                     await bot.answerCallbackQuery(
+
                         query.id
+
                     );
 
                     return;
+
                 }
+
 
                 const page =
                     Number(
+
                         data.replace(
+
                             "groups_page_",
+
                             ""
+
                         )
+
                     );
+
+
+                if (
+                    Number.isNaN(
+                        page
+                    )
+                ) {
+
+                    await bot.answerCallbackQuery(
+
+                        query.id,
+
+                        {
+
+                            text:
+                                "Некорректная страница"
+
+                        }
+
+                    );
+
+                    return;
+
+                }
+
 
                 try {
 
                     await bot.answerCallbackQuery(
+
                         query.id
+
                     );
+
 
                     await bot.deleteMessage(
 
@@ -137,6 +560,7 @@ function registerGroupSelectionHandlers(bot) {
                         query.message.message_id
 
                     );
+
 
                     await sendGroups(
 
@@ -151,8 +575,11 @@ function registerGroupSelectionHandlers(bot) {
                 } catch (error) {
 
                     console.error(
+
                         "❌ Ошибка переключения страницы:",
+
                         error
+
                     );
 
                 }
@@ -173,24 +600,55 @@ function registerGroupSelectionHandlers(bot) {
 
                 const groupId =
                     Number(
+
                         data.replace(
+
                             "select_group_",
+
                             ""
+
                         )
+
                     );
 
+
+                if (
+                    Number.isNaN(
+                        groupId
+                    )
+                ) {
+
+                    await bot.answerCallbackQuery(
+
+                        query.id,
+
+                        {
+
+                            text:
+                                "Некорректная группа",
+
+                            show_alert:
+                                true
+
+                        }
+
+                    );
+
+                    return;
+
+                }
+
+
                 try {
-
-                    const telegramId =
-                        query.from.id;
-
 
                     const user =
                         await User.findOne({
 
                             where: {
+
                                 telegramId:
                                     telegramId
+
                             }
 
                         });
@@ -203,19 +661,24 @@ function registerGroupSelectionHandlers(bot) {
                             query.id,
 
                             {
+
                                 text:
                                     "Пользователь не найден"
+
                             }
 
                         );
 
                         return;
+
                     }
 
 
                     const group =
                         await Group.findByPk(
+
                             groupId
+
                         );
 
 
@@ -226,19 +689,21 @@ function registerGroupSelectionHandlers(bot) {
                             query.id,
 
                             {
+
                                 text:
                                     "Группа не найдена"
+
                             }
 
                         );
 
                         return;
+
                     }
 
 
                     const [
-                        membership,
-                        created
+                        membership
                     ] =
                         await GroupMember.findOrCreate({
 
@@ -263,7 +728,7 @@ function registerGroupSelectionHandlers(bot) {
 
 
                     // ==========================================
-                    // СОХРАНЯЕМ ВЫБРАННУЮ ГРУППУ
+                    // СОХРАНЯЕМ НОВУЮ ГРУППУ
                     // ==========================================
 
                     if (
@@ -290,91 +755,31 @@ function registerGroupSelectionHandlers(bot) {
                         query.id,
 
                         {
+
                             text:
                                 `Выбрана группа ${group.name}`
+
                         }
 
                     );
 
 
                     // ==========================================
-                    // ОСНОВНОЕ МЕНЮ ГРУППЫ
+                    // ОТКРЫВАЕМ МЕНЮ НОВОЙ ГРУППЫ
                     // ==========================================
 
-                    const keyboard = [
+                    await sendGroupMenu(
 
-                        [
-                            {
-                                text:
-                                    "📚 Предметы",
-
-                                callback_data:
-                                    "group_subjects"
-                            }
-                        ],
-
-                        [
-                            {
-                                text:
-                                    "📝 Задачи",
-
-                                callback_data:
-                                    "group_tasks"
-                            }
-                        ],
-
-                        [
-                            {
-                                text:
-                                    "➕ Добавить задачу",
-
-                                callback_data:
-                                    "add_task"
-                            }
-                        ]
-
-                    ];
-
-
-                    // ==========================================
-                    // ПРОВЕРЯЕМ КУРАТОРА
-                    // ==========================================
-
-                    if (
-                        membership.role ===
-                        "CURATOR"
-                    ) {
-
-                        keyboard.push([
-
-                            {
-                                text:
-                                    "📩 Запросы на задачи",
-
-                                callback_data:
-                                    "curator_task_requests"
-                            }
-
-                        ]);
-
-                    }
-
-
-                    await bot.sendMessage(
+                        bot,
 
                         query.message.chat.id,
 
-                        `✅ Вы выбрали группу: ${group.name}\n\n` +
-                        `Выберите необходимое действие:`,
+                        telegramId,
 
                         {
 
-                            reply_markup: {
-
-                                inline_keyboard:
-                                    keyboard
-
-                            }
+                            prefix:
+                                "✅ Вы выбрали группу"
 
                         }
 
@@ -405,8 +810,13 @@ function registerGroupSelectionHandlers(bot) {
                         query.id,
 
                         {
+
                             text:
-                                "Произошла ошибка"
+                                "Произошла ошибка",
+
+                            show_alert:
+                                true
+
                         }
 
                     );
@@ -417,7 +827,9 @@ function registerGroupSelectionHandlers(bot) {
             }
 
         }
+
     );
+
 }
 
 
@@ -425,6 +837,10 @@ module.exports = {
 
     registerGroupSelectionHandlers,
 
-    sendGroups
+    sendGroups,
+
+    sendGroupMenu,
+
+    getSelectedGroup
 
 };
